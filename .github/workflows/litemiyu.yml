@@ -1,0 +1,159 @@
+# 把 LiteMiyu 的一次发布写进这个软件源的配方（Formula/litemiyu.rb）。手动触发。
+#
+# 做法：
+# 1. prepare：取 litemiyu 仓库里的模板，下载这次发布的 SHA256SUMS 和三个压缩包，核对哈希和构建出处证明，用
+#    `cargo xtask packaging` 填出配方。
+# 2. try（macOS Apple 芯片、Linux x86_64、Linux aarch64 各一台）：把填出的配方放进一个临时的软件源，过 `brew style`，
+#    照它真装（压缩包是 Homebrew 自己照配方里的地址从 GitHub Release 下载的，地址和哈希在这里就验过了），再跑 `brew test`。
+# 3. publish（只在不是演练时跑）：把配方提交到这个仓库。用的是这个仓库自己的 github.token，没有别的密钥。
+#
+# 第一次用、改了模板以后，都先照演练跑一遍（dry_run 默认是开着的）。
+
+name: litemiyu
+run-name: LiteMiyu ${{ inputs.tag }}${{ inputs.dry_run && '（演练）' || '' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: LiteMiyu 的发版标签，例如 v2026.11.0
+        required: true
+        type: string
+      templates_ref:
+        description: 模板取自 litemiyu 仓库的哪个分支、标签或提交；不写就是上面的标签
+        required: false
+        type: string
+        default: ''
+      dry_run:
+        description: 只演练：核对、试装，不改这个仓库
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: litemiyu
+  cancel-in-progress: false
+
+env:
+  SOURCE_REPO: miyu-agent/litemiyu
+  HOMEBREW_NO_AUTO_UPDATE: '1'
+  HOMEBREW_NO_ANALYTICS: '1'
+  HOMEBREW_NO_INSTALL_CLEANUP: '1'
+  HOMEBREW_NO_ENV_HINTS: '1'
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: 标签的样子对
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "${TAG}" =~ ^v[0-9]{4}\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]] || { echo "::error::标签 ${TAG} 不是 v<年>.<月>.<序号> 或者带 -rc.N 的"; exit 1; }
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ inputs.templates_ref || inputs.tag }}
+          persist-credentials: false
+      - name: 下载这次发布的校验文件和三个压缩包，核对哈希和构建出处
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          mkdir -p "${RUNNER_TEMP}/assets"
+          cd "${RUNNER_TEMP}/assets"
+          gh release download "${TAG}" -R "${SOURCE_REPO}" -p SHA256SUMS -p "litemiyu-${version}-*.tar.gz"
+          for platform in linux-x86_64 linux-aarch64 macos-aarch64; do
+            file="litemiyu-${version}-${platform}.tar.gz"
+            grep -E "  \*?${file//./\\.}\$" SHA256SUMS | sha256sum -c -
+            gh attestation verify "${file}" -R "${SOURCE_REPO}"
+          done
+      - name: 装上 rust-toolchain.toml 钉住的工具链
+        run: rustup toolchain install
+      - name: 填配方
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          cargo xtask packaging "${TAG}" --sums "${RUNNER_TEMP}/assets/SHA256SUMS" --out "${RUNNER_TEMP}/out"
+          cat "${RUNNER_TEMP}/out/homebrew/litemiyu.rb"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: formula
+          path: ${{ runner.temp }}/out/homebrew/litemiyu.rb
+          if-no-files-found: error
+          retention-days: 14
+
+  try:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: formula
+          path: formula
+      - name: 找到 Homebrew
+        run: |
+          set -euo pipefail
+          if ! command -v brew >/dev/null; then
+            [ -x /home/linuxbrew/.linuxbrew/bin/brew ] || { echo "::error::这台机器上没有 Homebrew"; exit 1; }
+            echo /home/linuxbrew/.linuxbrew/bin >> "${GITHUB_PATH}"
+          fi
+      - name: 放进临时的软件源，查写法、真装、跑测试
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          brew --version
+          brew tap-new --no-git local/try
+          cp formula/litemiyu.rb "$(brew --repository local/try)/Formula/litemiyu.rb"
+          brew style local/try/litemiyu
+          brew install local/try/litemiyu
+          brew test local/try/litemiyu
+          printed=$(litemiyu --version)
+          echo "${printed}"
+          [ "${printed}" = "litemiyu ${TAG#v}" ] || { echo "::error::装上的程序印的是 ${printed}"; exit 1; }
+          brew audit --formula local/try/litemiyu || echo "::warning::brew audit 有话说，见上面"
+          brew uninstall local/try/litemiyu
+          brew untap local/try
+
+  publish:
+    needs: [prepare, try]
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: formula
+          path: ${{ runner.temp }}/formula
+      - name: 提交配方
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p Formula
+          cp "${RUNNER_TEMP}/formula/litemiyu.rb" Formula/litemiyu.rb
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Formula/litemiyu.rb
+          if git diff --cached --quiet; then
+            echo "配方已经是这一份，没有要提交的"
+          else
+            git commit -m "litemiyu ${TAG#v}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
