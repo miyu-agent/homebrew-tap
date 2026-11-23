@@ -9,27 +9,27 @@
 class Litemiyu < Formula
   desc "Single-process agent harness for the terminal, one static program"
   homepage "https://github.com/miyu-agent/litemiyu"
-  version "2026.11.1"
+  version "2026.11.2"
   license "AGPL-3.0-or-later"
 
   on_macos do
     depends_on arch: :arm64
 
     on_arm do
-      url "https://github.com/miyu-agent/litemiyu/releases/download/v2026.11.1/litemiyu-2026.11.1-macos-aarch64.tar.gz"
-      sha256 "f9e5a2a49cf80fc9224fcd99a1cbcb3d7441743e54f0038654c43fa427b8232d"
+      url "https://github.com/miyu-agent/litemiyu/releases/download/v2026.11.2/litemiyu-2026.11.2-macos-aarch64.tar.gz"
+      sha256 "e94e085760889c04b444c4663d2124d02a05e342ae999f4d6651fae8c7022113"
     end
   end
 
   on_linux do
     on_intel do
-      url "https://github.com/miyu-agent/litemiyu/releases/download/v2026.11.1/litemiyu-2026.11.1-linux-x86_64.tar.gz"
-      sha256 "86a1ef986b07833edaae6dd3571671ebc534e242d3af6af5c583031a944fe91c"
+      url "https://github.com/miyu-agent/litemiyu/releases/download/v2026.11.2/litemiyu-2026.11.2-linux-x86_64.tar.gz"
+      sha256 "e5f203e7957a0d74cd1a7667ed304fe5fd760218bdf1a8d0114d1ca893c4bc3e"
     end
 
     on_arm do
-      url "https://github.com/miyu-agent/litemiyu/releases/download/v2026.11.1/litemiyu-2026.11.1-linux-aarch64.tar.gz"
-      sha256 "66c6574f1094463313ae0bfed43804c4d80babfbfc58557dbd19e3ddcd9fb245"
+      url "https://github.com/miyu-agent/litemiyu/releases/download/v2026.11.2/litemiyu-2026.11.2-linux-aarch64.tar.gz"
+      sha256 "60187df9c72c4f3abd965044fea85263efd5d298b66456aff77cf053ea03f1bd"
     end
   end
 
